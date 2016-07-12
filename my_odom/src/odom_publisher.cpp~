@@ -21,7 +21,7 @@ int main(int argc, char** argv){
   current_time = ros::Time::now();
   last_time = ros::Time::now();
 
-  ros::Rate r(5);														// publish the odometry information at a rate of 5Hz
+  ros::Rate r(5);														// publish the odometry information at a rate of 1Hz
   while(n.ok()){
 
     ros::spinOnce();               // check for incoming messages
