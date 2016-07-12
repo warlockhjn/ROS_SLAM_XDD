@@ -1,0 +1,45 @@
+<?xml version="1.0"?>
+<robot name="sp1s">
+  <link name="base_link">
+    <visual>
+      <geometry>
+        <cylinder length="0.05" radius="0.25"/>
+      </geometry>
+      <material name="orange">
+         <color rgba="1 0.84 0 0.5"/>
+      </material>
+    </visual>
+  </link>
+  <link name="left">
+    <visual>
+      <geometry>
+        <cylinder length="0.01" radius="0.025"/>
+      </geometry>
+      <material name="white">
+         <color rgba="1 1 1 0.5"/>
+      </material>
+    </visual>
+  </link>
+  <link name="right">
+    <visual>
+      <geometry>
+        <cylinder length="0.01" radius="0.025"/>
+      </geometry>
+      <material name="white">
+         <color rgba="1 1 1 0.5"/>
+      </material>
+    </visual>
+  </link>
+  <joint name="base_to_left" type="continuous">
+    <origin rpy="0 1.57075 0" xyz="-0.2 0 -0.01"/>
+    <parent link="base_link"/>
+    <child link="left"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+  <joint name="base_to_right" type="continuous">
+    <origin rpy="0 1.57075 0" xyz="0.2 0 -0.01"/>
+    <parent link="base_link"/>
+    <child link="right"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+</robot>
