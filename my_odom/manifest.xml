@@ -1,0 +1,19 @@
+<package>
+  <description brief="my_odom">
+
+     my_odom
+
+  </description>
+  <author>jenningshu</author>
+  <license>BSD</license>
+  <review status="unreviewed" notes=""/>
+  <url>http://ros.org/wiki/my_odom</url>
+  <depend package="tf"/>
+  <depend package="std_msgs"/>
+  <depend package="rospy"/>
+  <depend package="roscpp"/>
+  <depend package="urdf"/>
+
+</package>
+
+

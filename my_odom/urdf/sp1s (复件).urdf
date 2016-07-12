@@ -1,0 +1,85 @@
+<?xml version="1.0"?>
+<robot name="sp1s">
+  <link name="base_link">
+    <visual>
+      <geometry>
+        <box size="0.27 .15 .003"/>
+      </geometry>
+      <material name="white">
+         <color rgba="1 1 1 .5"/>
+    </material>
+    </visual>
+  </link>
+  
+  <link name="tyer_front_left">
+    <visual>
+      <geometry>
+       <cylinder length=".025" radius="0.034"></cylinder>
+      </geometry>
+      <material name="yellow">
+          <color rgba="1 1 0 1"/>
+      </material>  
+    </visual>
+  </link>
+
+  <link name="tyer_front_right">
+    <visual>
+      <geometry>
+       <cylinder length=".025" radius="0.034"></cylinder>
+      </geometry>
+      <material name="yellow">  
+          <color rgba="1 1 0 1"/>  
+      </material>  
+    </visual>
+  </link>
+  
+  <link name="tyer_back_left">
+    <visual>
+      <geometry>
+       <cylinder length=".025" radius="0.034"></cylinder>
+      </geometry>
+      <material name="yellow">  
+          <color rgba="1 1 0 1"/>  
+      </material>  
+    </visual>
+  </link>
+  
+  <link name="tyer_back_right">
+    <visual>
+      <geometry>
+       <cylinder length=".025" radius="0.034"></cylinder>
+      </geometry>
+      <material name="yellow">  
+          <color rgba="1 1 0 1"/>  
+      </material>  
+    </visual>
+  </link>
+  
+  <joint name="base_to_front_left" type="continuous">
+    <origin rpy="1.57075  0  0" xyz="0.06  0.064  -0.011"/>
+    <parent link="base_link"/>
+    <child link="tyer_front_left"/>    
+    <axis xyz="0 0 1"/>
+  </joint>
+
+  <joint name="base_to_front_right" type="continuous">
+    <origin rpy="1.57075  0  0" xyz="0.06  -0.064  -0.011"/>
+    <parent link="base_link"/>
+    <child link="tyer_front_right"/>    
+    <axis xyz="0 0 1"/>
+  </joint>
+
+  <joint name="base_to_back_left" type="continuous">
+    <origin rpy="1.57075  0  0" xyz="-0.06  0.064  -0.011"/>
+    <parent link="base_link"/>
+    <child link="tyer_back_left"/>    
+    <axis xyz="0 0 1"/>
+  </joint>
+
+  <joint name="base_to_back_right" type="continuous">
+    <origin rpy="1.57075  0  0" xyz="-0.06  -0.064  -0.011"/>
+    <parent link="base_link"/>
+    <child link="tyer_back_right"/>    
+    <axis xyz="0 0 1"/>
+  </joint>
+</robot>

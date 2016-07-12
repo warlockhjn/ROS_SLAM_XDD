@@ -1,0 +1,2 @@
+- setup-file:
+    local-name: /home/jenningshu/catkin_ws/my_odom/build/devel/setup.sh
