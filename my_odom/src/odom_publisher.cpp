@@ -35,7 +35,7 @@ int main(int argc, char** argv)
 
     ros::NodeHandle n;
     ros::Publisher odom_pub = n.advertise<nav_msgs::Odometry>("odom", 50);
-    tf::TransformBroadcaster odom_broadcaster;							// send message out using ROS and tf respectively
+    tf::TransformBroadcaster broadcaster;							     // send message out using ROS and tf respectively
 
     double x = 0.0;
     double y = 0.0;
@@ -165,7 +165,21 @@ int main(int argc, char** argv)
                     odom_trans.transform.rotation = odom_quat;
 
                     //send the transform
-                    odom_broadcaster.sendTransform(odom_trans);
+                    broadcaster.sendTransform(odom_trans);
+                    broadcaster.sendTransform(
+                        tf::StampedTransform(
+                            tf::Transform(tf::Quaternion(0, 0, 0, 1), tf::Vector3(0, 0, 0)),
+                            ros::Time::now(),
+                            "base_link", "base_laser"
+                        )
+                    );
+                    broadcaster.sendTransform(
+                        tf::StampedTransform(
+                            tf::Transform(tf::Quaternion(0, 0, 0, 1), tf::Vector3(0, 0, 0)),
+                            ros::Time::now(),
+                            "odom", "base_link"
+                        )
+                    );
 
                     //next, we'll publish the odometry message over ROS
                     nav_msgs::Odometry odom;
