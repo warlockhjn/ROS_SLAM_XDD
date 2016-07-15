@@ -1,33 +1,39 @@
 #include <cstdio>
 #include <cstdlib>
+#include <strings.h>
 #include <memory.h>
+#include <fcntl.h>
 #include <termios.h>
 #include <unistd.h>
-#include <fcntl.h>
-#include <sys/signal.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 
 #include <ros/ros.h>
+#include <ros/console.h>
 #include <tf/transform_broadcaster.h>
 #include <nav_msgs/Odometry.h>
 
 #define BAUDRATE B38400
 #define MODEMDEVICE "/dev/ttyUSB0"
-#define _POSIX_SOURCE 1
+#define _POSIX_SOURCE 1    // POSIX compliant source
+#define MAX_LEN 64
 
 typedef unsigned char BYTE;
-typedef unsigned short UINT32;
+typedef short INT16;
 typedef struct {
-    UINT32 leftDist, rightDist, targetX, targetY;
+    INT16 leftDist, rightDist, targetX, targetY;
     BYTE state1, state0;
-} SRDATA;
+} RecvData;
 
-bool ERROR = false;
-bool WAIT_FLAG = true;                    /* TRUE while no signal received */
+volatile bool ERROR = false;
+double x = 0.0;
+double y = 0.0;
+double th = 0.0;														// robot start at the origin of the "odom" coordinate frame initially
+ros::Time current_time, last_time;
+RecvData *current_data, *last_data;
 
-
-void signal_handler_IO(int status);   /* definition of signal handler */
-SRDATA* process_data(const BYTE *pStart, const BYTE *pEnd);
+RecvData* process_data(const BYTE *pStart, const BYTE *pEnd);
+void publish_odom(ros::Publisher odom_pub, tf::TransformBroadcaster broadcaster);
 
 int main(int argc, char** argv)
 {
@@ -37,184 +43,90 @@ int main(int argc, char** argv)
     ros::Publisher odom_pub = n.advertise<nav_msgs::Odometry>("odom", 50);
     tf::TransformBroadcaster broadcaster;							     // send message out using ROS and tf respectively
 
-    double x = 0.0;
-    double y = 0.0;
-    double th = 0.0;														// robot start at the origin of the "odom" coordinate frame initially
+    ros::Rate r(10);														// publish the odometry information at a rate of 10Hz
 
-    ros::Rate r(5);														// publish the odometry information at a rate of 5Hz
-
-    ros::Time current_time, last_time;
     last_time = ros::Time::now();
+    last_data = new RecvData { 0, 0 };
 
     int fd;
-    size_t res, bias = 0, raw_len = 129;
-    struct termios oldtio, newtio;
-    struct sigaction saio;           /* definition of signal action */
-    BYTE buf[128];
+    size_t res, bias = 0, raw_len = MAX_LEN + 1;
+    termios oldtio, newtio;
+    BYTE buf[MAX_LEN];
 
-    /* open the device to be non-blocking (read will return immediatly) */
-    fd = open(MODEMDEVICE, O_RDWR | O_NOCTTY | O_NONBLOCK);
-    if (fd < 0)
+    fd = open(MODEMDEVICE, O_RDWR | O_NOCTTY );
+    if(fd < 0)
     {
         perror(MODEMDEVICE);
-        exit(-1);
+        return 1;
     }
 
-    /* install the signal handler before making the device asynchronous */
-    saio.sa_handler = signal_handler_IO;
-    sigemptyset(&saio.sa_mask);
-    sigaddset(&saio.sa_mask, SIGINT);
-    //saio.sa_mask = 0;
-    saio.sa_flags = 0;
-    saio.sa_restorer = NULL;
-    sigaction(SIGIO, &saio, NULL);
+    tcgetattr(fd, &oldtio);    // save current port settings
 
-    /* allow the process to receive SIGIO */
-    fcntl(fd, F_SETOWN, getpid());
-    /* Make the file descriptor asynchronous (the manual page says only
-        O_APPEND and O_NONBLOCK, will work with F_SETFL...) */
-    fcntl(fd, F_SETFL, FASYNC);
-
-    tcgetattr(fd, &oldtio); /* save current port settings */
-    /* set new port settings for canonical input processing */
+    bzero(&newtio, sizeof(newtio));
     newtio.c_cflag = BAUDRATE | CRTSCTS | CS8 | CLOCAL | CREAD;
-    newtio.c_iflag = IGNPAR | ICRNL;
+    newtio.c_iflag = IGNPAR;
     newtio.c_oflag = 0;
-    newtio.c_lflag = ICANON;
-    newtio.c_cc[VMIN] = 1;
-    newtio.c_cc[VTIME] = 0;
+
+    /* set input mode (non-canonical, no echo,...) */
+    newtio.c_lflag = 0;
+
+    newtio.c_cc[VTIME] = 0;    // inter-character timer unused
+    newtio.c_cc[VMIN] = 5;     // blocking read until 5 chars received
+
     tcflush(fd, TCIFLUSH);
     tcsetattr(fd, TCSANOW, &newtio);
 
-    while(n.ok())
+    while(true)    // loop for input
     {
-        usleep(100000);
-        /* after receiving SIGIO, wait_flag = false, input is available
-            and can be read */
-        if (WAIT_FLAG == false)
+        if(bias == 0)
+            res = read(fd, buf, MAX_LEN);
+        else
+            res = read(fd, buf + bias, MAX_LEN - bias);
+        if (res == 0)
+            break;
+        bias += res;
+        if(ERROR == true)
         {
-            if(bias == 0)
-                res = read(fd, buf, 128);
-            else
-                res = read(fd, buf + bias, 128-bias);
-            printf("[read length: %zu]\n", res);
-            bias += res;
-            if(ERROR == true)
+            for(BYTE *p = buf + bias - res; p < buf + bias - 1; p++)
             {
-                for(BYTE *p = buf + bias - res; p < buf + bias - 1; p++)
+                if(*p == 0xa5 && *(p+1) == 0x5a)
                 {
-                    if(*p == 0xa5 && *(p+1) == 0x5a)
-                    {
-                        ERROR = false;
-                        memmove(buf, p, (size_t)buf + bias - (size_t)p);
-                        bias = (size_t)buf + bias - (size_t)p;
-                        raw_len = 129;
-                        break;
-                    }
+                    ERROR = false;
+                    memmove(buf, p, (size_t)buf + bias - (size_t)p);
+                    bias = (size_t)buf + bias - (size_t)p;
+                    raw_len = MAX_LEN + 1;
+                    break;
                 }
-                if(bias == 128)
-                    bias = 0;
             }
-            else
+            if(bias == MAX_LEN)
+                bias = 0;
+        }
+        else
+        {
+            if(raw_len == MAX_LEN + 1 && bias > 3)
             {
-                if(raw_len == 129 && bias > 3)
+                if(buf[0] != 0xa5 || buf[1] != 0x5a)
                 {
-                    if(buf[0] != 0xa5 || buf[1] != 0x5a)
-                    {
-                        printf("[head error! current head: 0x%02x 0x%02x]\n", buf[0], buf[1]);
-                        ERROR = true;
-                    }
-                    else
-                    {
-                        raw_len = buf[2] + 4;
-                        printf("[raw length: %zu]\n", raw_len);
-                    }
-                }
-                if(bias >= raw_len)
-                {
-                    printf("[raw data: ");
-                    for(int i = 0; i < raw_len; printf("0x%02x ", buf[i++]));
-                    printf("]\n");
-                    SRDATA* data = process_data(buf + 3, buf + raw_len - 1);
-                    if(data == NULL)
-                        continue;
-
-                    ros::spinOnce();               // check for incoming messages
-                    last_time = current_time;
-                    current_time = ros::Time::now();
-
-                    double dt = (current_time - last_time).toSec(),
-                           dx = (data->leftDist + data->rightDist) / 200,
-                           dth = (data->rightDist - data->leftDist) / 120;
-
-                    x += dx;
-                    th += dth;
-
-                    // since all odometry is 6DOF we'll need a quaternion created from yaw
-                    geometry_msgs::Quaternion odom_quat = tf::createQuaternionMsgFromYaw(th);
-
-                    //first, we'll publish the transform over tf
-                    geometry_msgs::TransformStamped odom_trans;
-                    odom_trans.header.stamp = current_time;
-                    odom_trans.header.frame_id = "odom";
-                    odom_trans.child_frame_id = "base_link";
-
-                    odom_trans.transform.translation.x = x;
-                    odom_trans.transform.translation.y = y;
-                    odom_trans.transform.translation.z = 0.0;
-                    odom_trans.transform.rotation = odom_quat;
-
-                    //send the transform
-                    broadcaster.sendTransform(odom_trans);
-                    broadcaster.sendTransform(
-                        tf::StampedTransform(
-                            tf::Transform(tf::Quaternion(0, 0, 0, 1), tf::Vector3(0, 0, 0)),
-                            ros::Time::now(),
-                            "base_link", "base_laser"
-                        )
-                    );
-                    broadcaster.sendTransform(
-                        tf::StampedTransform(
-                            tf::Transform(tf::Quaternion(0, 0, 0, 1), tf::Vector3(0, 0, 0)),
-                            ros::Time::now(),
-                            "odom", "base_link"
-                        )
-                    );
-
-                    //next, we'll publish the odometry message over ROS
-                    nav_msgs::Odometry odom;
-                    odom.header.stamp = current_time;
-                    odom.header.frame_id = "odom";
-
-                    //set the position
-                    odom.pose.pose.position.x = x;
-                    odom.pose.pose.position.y = y;
-                    odom.pose.pose.position.z = 0.0;
-                    odom.pose.pose.orientation = odom_quat;
-
-                    //set the velocity
-                    odom.child_frame_id = "base_link";
-                    odom.twist.twist.linear.x = dx / dt;
-                    odom.twist.twist.linear.y = 0;
-                    odom.twist.twist.angular.z = dth / dt;
-
-                    //publish the message
-                    odom_pub.publish(odom);
-
-                    last_time = current_time;
-                    r.sleep();
-
-                    delete data;
-                    bias -= raw_len;
-                    memmove(buf, buf + raw_len, bias);
-                    raw_len = 129;
-                }
-                if(bias == 128)
+                    printf("[head error! current head: 0x%02x 0x%02x]\n", buf[0], buf[1]);
                     ERROR = true;
+                }
+                else
+                    raw_len = buf[2] + 4;
             }
-            if (res == 0)
-                break;             /* stop loop if an error occured */
-            WAIT_FLAG = true;      /* wait for new input */
+            if(bias >= raw_len)
+            {
+                current_data = process_data(buf + 3, buf + raw_len - 1);
+                if(current_data == NULL)
+                    continue;
+                publish_odom(odom_pub, broadcaster);
+                delete last_data;
+                last_data = current_data;
+                bias -= raw_len;
+                memmove(buf, buf + raw_len, bias);
+                raw_len = MAX_LEN + 1;
+            }
+            if(bias == MAX_LEN)
+                ERROR = true;
         }
     }
 
@@ -223,32 +135,94 @@ int main(int argc, char** argv)
     return 0;
 }
 
-/***************************************************************************
-* signal handler. sets wait_flag to false, to indicate above loop that     *
-* characters have been received.                                           *
-***************************************************************************/
-
-void signal_handler_IO(int status)
-{
-    WAIT_FLAG = false;
-}
-
-SRDATA* process_data(const BYTE *pStart, const BYTE *pEnd)
+RecvData* process_data(const BYTE *pStart, const BYTE *pEnd)
 {
     BYTE check = 0x00;
-    for(BYTE *p = (BYTE*)pStart; p < pEnd; p++)
-        check += *p;
+    for(BYTE *p = const_cast<BYTE*>(pStart); p < pEnd; check += *(p++));
     if(check != *pEnd)
+    {
+        printf("[sum check error! except: 0x%02x actual: 0x%02x]\n", *pEnd, check);
         return NULL;
-    UINT32 *lDist, *rDist, *lTarg, *rTarg;
+    }
+    INT16 *lDist, *rDist, *lTarg, *rTarg;
     BYTE *state1, *state0;
-    SRDATA *data = new SRDATA();
-    data->leftDist = *((UINT32 *)pStart);
-    data->rightDist = *((UINT32 *)(pStart + 2));
-    data->targetX = *((UINT32 *)(pStart + 4));
-    data->targetY = *((UINT32 *)(pStart + 6));
-    data->state1 = *(pStart + 7);
-    data->state0 = *(pStart + 8);
+    RecvData *data = new RecvData {
+        (pStart[0] << 8) | pStart[1], (pStart[2] << 8) | pStart[3],
+        (pStart[4] << 8) | pStart[5], (pStart[6] << 8) | pStart[7],
+        pStart[8], pStart[9]
+    };
     return data;
 }
 
+void publish_odom(ros::Publisher odom_pub, tf::TransformBroadcaster broadcaster)
+{
+    ros::spinOnce();               // check for incoming messages
+    last_time = current_time;
+    current_time = ros::Time::now();
+
+    double dt, dld, drd, dx, dth;
+    dt = (current_time - last_time).toSec();
+    if(current_data->targetY != last_data->targetY)
+    {
+        printf("[new action]\n");
+        dld = current_data->leftDist;
+        drd = current_data->rightDist;
+    }
+    else
+    {
+        dld = current_data->leftDist - last_data->leftDist;
+        drd = current_data->rightDist - last_data->rightDist;
+    }
+    dx = (dld + drd) / 200.0;
+    dth = (drd - dld) / 120.0;
+    x += dx;
+    th += dth;
+    printf("[left distance: %hu, right distance: %hu, target x: %hu, target y: %hu]\n", current_data->leftDist, current_data->rightDist, current_data->targetX, current_data->targetY);
+    //printf("[left distance: %lf, right distance: %lf, delta x: %lf, delta th: %lf, delta t: %lf]\n", dld, drd, dx, dth, dt);
+
+    // since all odometry is 6DOF we'll need a quaternion created from yaw
+    geometry_msgs::Quaternion odom_quat = tf::createQuaternionMsgFromYaw(th);
+
+    //first, we'll publish the transform over tf
+    geometry_msgs::TransformStamped odom_trans;
+    odom_trans.header.stamp = current_time;
+    odom_trans.header.frame_id = "odom";
+    odom_trans.child_frame_id = "base_link";
+
+    odom_trans.transform.translation.x = x;
+    odom_trans.transform.translation.y = y;
+    odom_trans.transform.translation.z = 0.0;
+    odom_trans.transform.rotation = odom_quat;
+
+    //send the transform
+    broadcaster.sendTransform(odom_trans);
+    broadcaster.sendTransform(
+        tf::StampedTransform(
+            tf::Transform(tf::Quaternion(0, 0, 0, 1), tf::Vector3(0, 0, 0)),
+            ros::Time::now(),
+            "base_link", "base_laser"
+        )
+    );
+
+    //next, we'll publish the odometry message over ROS
+    nav_msgs::Odometry odom;
+    odom.header.stamp = current_time;
+    odom.header.frame_id = "odom";
+
+    //set the position
+    odom.pose.pose.position.x = x;
+    odom.pose.pose.position.y = y;
+    odom.pose.pose.position.z = 0.0;
+    odom.pose.pose.orientation = odom_quat;
+
+    //set the velocity
+    odom.child_frame_id = "base_link";
+    odom.twist.twist.linear.x = dx / dt;
+    odom.twist.twist.linear.y = 0;
+    odom.twist.twist.angular.z = dth / dt;
+
+    //publish the message
+    odom_pub.publish(odom);
+
+    last_time = current_time;
+}

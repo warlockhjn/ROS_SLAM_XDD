@@ -112,6 +112,9 @@ catkin_package(
 ## Build ##
 ###########
 
+set(CMAKE_CXX_FLAGS "-std=c++11")
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/bin)
+
 ## Specify additional locations of header files
 ## Your package locations should be listed before other locations
 # include_directories(include)
@@ -132,10 +135,6 @@ include_directories(
 ## Declare a C++ executable
 # add_executable(my_odom_node src/my_odom_node.cpp)
 add_executable(odom_publisher src/odom_publisher.cpp)
-
-set_target_properties(odom_publisher
-  PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/bin
-)
 
 ## Add cmake target dependencies of the executable
 ## same as for the library above
